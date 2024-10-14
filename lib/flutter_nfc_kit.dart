@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_nfc_kit/models.dart';
 import 'package:ndef/ndef.dart' as ndef;
 import 'package:ndef/ndef.dart' show TypeNameFormat; // for generated file
 import 'package:ndef/utilities.dart';
@@ -284,6 +285,44 @@ class FlutterNfcKit {
         await _channel.invokeMethod('getNFCAvailability');
     return NFCAvailability.values
         .firstWhere((it) => it.toString() == "NFCAvailability.$availability");
+  }
+
+  static Future<CardData> read({
+    Duration? timeout,
+    required String type,
+    required String model,
+    required String osVersion,
+    required String nfcDevice,
+    required String deviceId,
+    required String appVersion,
+  }) async {
+    int technologies = 0x0;
+    technologies |= 0x1;
+
+    try {
+      final String data = await _channel.invokeMethod('read', {
+        'timeout': timeout?.inMilliseconds ?? POLL_TIMEOUT,
+        'technologies': technologies,
+        'data': {
+          'type': type,
+          'model': model,
+          'osVersion': osVersion,
+          'nfcDevice': nfcDevice,
+          'deviceId': deviceId,
+          'appVersion': appVersion,
+        },
+      });
+      return CardData.fromJson(jsonDecode(data));
+    } on PlatformException catch (e) {
+      if (e.code == "3") { // Unknown metro api response code
+        throw UnknownMetroApiException();
+      } else if (e.code == "1" || e.code == "4") { // Unable to perform network request
+        throw NoNetworkException();
+      } else if (e.code == "2") { // Invalid metro api response
+        throw InvalidMetroApiException();
+      }
+      rethrow;
+    }
   }
 
   /// Try to poll a NFC tag from reader.

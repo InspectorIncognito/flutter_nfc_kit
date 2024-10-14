@@ -16,6 +16,14 @@ import im.nfc.flutter_nfc_kit.ByteUtils.toHexString
 import im.nfc.flutter_nfc_kit.MifareUtils.readBlock
 import im.nfc.flutter_nfc_kit.MifareUtils.readSector
 import im.nfc.flutter_nfc_kit.MifareUtils.writeBlock
+import im.nfc.flutter_nfc_kit.inra.DeviceData
+import im.nfc.flutter_nfc_kit.inra.RestMetroClientHelper
+import im.nfc.flutter_nfc_kit.inra.card.CardCommandExecutioner
+import im.nfc.flutter_nfc_kit.inra.rest.RequestErrorMsg
+import im.nfc.flutter_nfc_kit.inra.rest.ResponseCodeCatalogue
+import im.nfc.flutter_nfc_kit.inra.rest.response.CardDataResponse
+import im.nfc.flutter_nfc_kit.inra.rest.response.CardReadCommandResponse
+import im.nfc.flutter_nfc_kit.inra.utils.JsonConverter
 import io.flutter.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -30,6 +38,7 @@ import java.io.IOException
 import java.lang.ref.WeakReference
 import java.lang.reflect.InvocationTargetException
 import java.util.*
+import kotlin.collections.HashMap
 import kotlin.concurrent.schedule
 
 
@@ -149,6 +158,25 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val technologies = call.argument<Int>("technologies")!!
                 runOnNfcThread(result, "Poll") {
                     pollTag(nfcAdapter, result, timeout, technologies)
+                }
+            }
+
+            "read" -> {
+                val timeout = call.argument<Int>("timeout")!!
+                val rawDeviceData = call.argument<HashMap<String, String>>("data")!!
+                //val rawDeviceData = JSONObject(jsonString)
+                val deviceData = DeviceData(
+                    rawDeviceData.get("type")!!,
+                    rawDeviceData.get("osVersion")!!,
+                    rawDeviceData.get("model")!!,
+                    rawDeviceData.get("nfcDevice")!!,
+                    rawDeviceData.get("deviceId")!!,
+                    rawDeviceData.get("appVersion")!!,
+                )
+
+                val technologies = call.argument<Int>("technologies")!!
+                runOnNfcThread(result, "Read") {
+                    read(nfcAdapter, result, timeout, technologies, deviceData)
                 }
             }
 
@@ -413,7 +441,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             result.error("408", "Polling tag timeout", null)
         }
 
-        val pollHandler = NfcAdapter.ReaderCallback { tag ->
+        val pollHandler = ReaderCallback { tag ->
             pollingTimeoutTask?.cancel()
 
             // common fields
@@ -561,6 +589,74 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
 
         nfcAdapter.enableReaderMode(activity.get(), pollHandler, technologies, null)
+    }
+
+    private fun read(nfcAdapter: NfcAdapter, result: Result, timeout: Int, technologies: Int, deviceData: DeviceData) {
+        Log.d(TAG, "read")
+        pollingTimeoutTask = Timer().schedule(timeout.toLong()) {
+            try {
+                if (activity.get() != null) {
+
+                    nfcAdapter.disableReaderMode(activity.get())
+                }
+            } catch (ex: Exception) {
+                Log.w(TAG, "Cannot disable reader mode", ex)
+            }
+            result.error("408", "Polling tag timeout", null)
+        }
+
+        val readHandler = ReaderCallback { tag ->
+            val mifareClassic = MifareClassic.get(tag)
+            Log.d(TAG, "got card")
+            if (mifareClassic != null) {
+                Log.d(TAG, "card is mifare")
+                val getCardListener = object : RestMetroClientHelper.GetDataCompletionListener {
+                    override fun onGetCardResponse(response: CardDataResponse?) {
+                        Log.d(TAG, "onGetCardResponse")
+                        val data = JsonConverter().toJson(response!!.cardData)
+                        Log.d(TAG, data.toString())
+                        result.success(data.toString())
+                    }
+
+                    override fun onReadingError(response: RequestErrorMsg?) {
+                        result.error("4", "onReadingResponse", null)
+                    }
+                }
+
+                val readingListener = object : RestMetroClientHelper.ReadingCompletionListener {
+                    override fun onReadingResponse(response: CardReadCommandResponse?) {
+                        Log.d(TAG, "onReadingResponse")
+                        if (response != null) {
+                            val resultCode = response.code
+                            val commands = response.commands
+                            if (resultCode != null && resultCode == ResponseCodeCatalogue.CARD_PENDING_OPERATION.value) {
+                                Log.d(TAG, "CARD_PENDING_OPERATION")
+                                val responses = CardCommandExecutioner().executeCardCommandsAndroidV2(mifareClassic, commands)
+                                RestMetroClientHelper.getInstance().getReadingCommands(mifareClassic.tag.id, deviceData, this, response.transactionId, responses)
+                            } else if (resultCode != null && resultCode >= ResponseCodeCatalogue.OPERATION_OK.value) {
+                                Log.d(TAG, "OPERATION_OK")
+                                RestMetroClientHelper.getInstance().getCardData(mifareClassic.tag.id, deviceData, getCardListener)
+                            } else {
+                                Log.d(TAG, "UNKNOWN CODE: $resultCode")
+                                result.error("3", "onReadingResponse", null)
+                            }
+                        } else {
+                            Log.d(TAG, "NULL Response")
+                            result.error("2", response.toString(), null)
+                        }
+                    }
+
+                    override fun onReadingError(response: RequestErrorMsg?) {
+                        Log.d(TAG, "onReadingError")
+                        result.error("1", response.toString(), null)
+                    }
+                }
+
+                RestMetroClientHelper.getInstance().getReadingCommands(mifareClassic.tag.id, deviceData, readingListener, "", null)
+            }
+        }
+
+        nfcAdapter.enableReaderMode(activity.get(), readHandler, technologies, null)
     }
 
     private class MethodResultWrapper(result: Result) : Result {

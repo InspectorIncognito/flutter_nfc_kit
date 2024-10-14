@@ -99,41 +99,18 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                 ElevatedButton(
                   onPressed: () async {
                     try {
-                      NFCTag tag = await FlutterNfcKit.poll();
+                      var tag = await FlutterNfcKit.read(
+                          type: 'Android',
+                          model: 'Motorola moto g34 5G',
+                          osVersion: '14',
+                          nfcDevice: 'NFC',
+                          deviceId: 'd32665b9-c642-4f1f-9243-906a7b0345a9',
+                          appVersion: '1.6.0',
+                      );
+                      //NFCTag tag = await FlutterNfcKit.poll();
                       setState(() {
-                        _tag = tag;
+
                       });
-                      await FlutterNfcKit.setIosAlertMessage(
-                          "Working on it...");
-                      _mifareResult = null;
-                      if (tag.standard == "ISO 14443-4 (Type B)") {
-                        String result1 =
-                            await FlutterNfcKit.transceive("00B0950000");
-                        String result2 = await FlutterNfcKit.transceive(
-                            "00A4040009A00000000386980701");
-                        setState(() {
-                          _result = '1: $result1\n2: $result2\n';
-                        });
-                      } else if (tag.type == NFCTagType.iso18092) {
-                        String result1 =
-                            await FlutterNfcKit.transceive("060080080100");
-                        setState(() {
-                          _result = '1: $result1\n';
-                        });
-                      } else if (tag.ndefAvailable ?? false) {
-                        var ndefRecords = await FlutterNfcKit.readNDEFRecords();
-                        var ndefString = '';
-                        for (int i = 0; i < ndefRecords.length; i++) {
-                          ndefString += '${i + 1}: ${ndefRecords[i]}\n';
-                        }
-                        setState(() {
-                          _result = ndefString;
-                        });
-                      } else if (tag.type == NFCTagType.webusb) {
-                        var r = await FlutterNfcKit.transceive(
-                            "00A4040006D27600012401");
-                        print(r);
-                      }
                     } catch (e) {
                       setState(() {
                         _result = 'error: $e';

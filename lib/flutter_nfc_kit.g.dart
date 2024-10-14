@@ -8,10 +8,10 @@ part of 'flutter_nfc_kit.dart';
 
 MifareInfo _$MifareInfoFromJson(Map<String, dynamic> json) => MifareInfo(
       json['type'] as String,
-      json['size'] as int,
-      json['blockSize'] as int,
-      json['blockCount'] as int,
-      json['sectorCount'] as int?,
+      (json['size'] as num).toInt(),
+      (json['blockSize'] as num).toInt(),
+      (json['blockCount'] as num).toInt(),
+      (json['sectorCount'] as num?)?.toInt(),
     );
 
 Map<String, dynamic> _$MifareInfoToJson(MifareInfo instance) =>
@@ -38,7 +38,7 @@ NFCTag _$NFCTagFromJson(Map<String, dynamic> json) => NFCTag(
       json['dsfId'] as String?,
       json['ndefAvailable'] as bool?,
       json['ndefType'] as String?,
-      json['ndefCapacity'] as int?,
+      (json['ndefCapacity'] as num?)?.toInt(),
       json['ndefWritable'] as bool?,
       json['ndefCanMakeReadOnly'] as bool?,
       json['webUSBCustomProbeData'] as String?,
