@@ -85,6 +85,14 @@ packages:
       relative: true
     source: path
     version: "3.5.2"
+  flutter_plugin_android_lifecycle:
+    dependency: transitive
+    description:
+      name: flutter_plugin_android_lifecycle
+      sha256: "592dc01a18961a51c24ae5d963b724b2b7fa4a95c100fe8eb6ca8a5a4732cadf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.18"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -262,4 +270,4 @@ packages:
     version: "0.1.4-beta"
 sdks:
   dart: ">=3.1.0 <4.0.0"
-  flutter: ">=2.0.0"
+  flutter: ">=3.13.0"

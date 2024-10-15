@@ -1,6 +1,7 @@
 package im.nfc.flutter_nfc_kit
 
 import android.app.Activity
+import android.content.Intent
 import android.nfc.FormatException
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
@@ -28,6 +29,7 @@ import io.flutter.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -40,10 +42,13 @@ import java.lang.reflect.InvocationTargetException
 import java.util.*
 import kotlin.collections.HashMap
 import kotlin.concurrent.schedule
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter
+import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 
 
 class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
-
     companion object {
         private val TAG = FlutterNfcKitPlugin::class.java.name
         private var activity: WeakReference<Activity> = WeakReference(null)
@@ -90,6 +95,9 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
+    private var eventSink: EventChannel.EventSink? = null
+    private var enableResult: Result? = null
+
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         nfcHandlerThread = HandlerThread("NfcHandlerThread")
         nfcHandlerThread.start()
@@ -97,6 +105,18 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
         val channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_nfc_kit")
         channel.setMethodCallHandler(this)
+
+        val eventChannel = EventChannel(flutterPluginBinding.binaryMessenger, "flutter_nfc_kit_stream")
+        eventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                eventSink = events;
+            }
+
+            override fun onCancel(arguments: Any?) {
+                eventSink = null
+            }
+
+        })
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -116,7 +136,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
         val nfcAdapter = getDefaultAdapter(activity.get())
 
-        if (nfcAdapter?.isEnabled != true && call.method != "getNFCAvailability") {
+        if (nfcAdapter?.isEnabled != true && (call.method != "getNFCAvailability" && call.method != "enable")) {
             result.error("404", "NFC not available", null)
             return
         }
@@ -143,6 +163,10 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
 
         when (call.method) {
+            "enable" -> {
+                activity.get()?.startActivity(Intent(android.provider.Settings.ACTION_NFC_SETTINGS))
+                enableResult = result
+            }
 
             "getNFCAvailability" -> {
                 when {
@@ -413,6 +437,19 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = WeakReference(binding.activity)
+        (binding.lifecycle as HiddenLifecycleReference).lifecycle.addObserver(LifecycleEventObserver { source, event ->
+            if (event == Lifecycle.Event.ON_RESUME){
+                if (enableResult != null) {
+                    val nfcAdapter = getDefaultAdapter(activity.get())
+                    when {
+                        nfcAdapter == null -> enableResult?.success("not_supported")
+                        nfcAdapter.isEnabled -> enableResult?.success("available")
+                        else -> enableResult?.success("disabled")
+                    }
+                    enableResult = null
+                }
+            }
+        })
     }
 
     override fun onDetachedFromActivity() {
@@ -609,6 +646,9 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             val mifareClassic = MifareClassic.get(tag)
             Log.d(TAG, "got card")
             if (mifareClassic != null) {
+                activity.get()?.runOnUiThread {
+                    eventSink?.success(1)
+                }
                 Log.d(TAG, "card is mifare")
                 val getCardListener = object : RestMetroClientHelper.GetDataCompletionListener {
                     override fun onGetCardResponse(response: CardDataResponse?) {

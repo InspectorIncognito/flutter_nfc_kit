@@ -278,6 +278,7 @@ class FlutterNfcKit {
   static const int POLL_TIMEOUT = 20 * 1000;
 
   static const MethodChannel _channel = MethodChannel('flutter_nfc_kit');
+  static const EventChannel _connectionEventChannel = EventChannel('flutter_nfc_kit_stream');
 
   /// get the availablility of NFC reader on this device
   static Future<NFCAvailability> get nfcAvailability async {
@@ -312,6 +313,7 @@ class FlutterNfcKit {
           'appVersion': appVersion,
         },
       });
+      await finish();
       return CardData.fromJson(jsonDecode(data));
     } on PlatformException catch (e) {
       if (e.code == "3") { // Unknown metro api response code
@@ -376,6 +378,16 @@ class FlutterNfcKit {
       'probeWebUSBMagic': probeWebUSBMagic,
     });
     return NFCTag.fromJson(jsonDecode(data));
+  }
+
+  static Stream<bool> onCardDetected() {
+    return _connectionEventChannel.receiveBroadcastStream().map<bool>((value) => value == 1);
+  }
+
+  static Future<NFCAvailability> enable() async {
+    var availability = await _channel.invokeMethod('enable', {});
+    return NFCAvailability.values
+        .firstWhere((it) => it.toString() == "NFCAvailability.$availability");
   }
 
   /// Works only on iOS
