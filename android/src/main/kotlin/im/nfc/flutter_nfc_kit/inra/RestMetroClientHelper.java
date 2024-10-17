@@ -16,9 +16,11 @@ import im.nfc.flutter_nfc_kit.inra.rest.RestRequestTask;
 import im.nfc.flutter_nfc_kit.inra.rest.RestResponse;
 import im.nfc.flutter_nfc_kit.inra.rest.RestTaskGenericListener;
 import im.nfc.flutter_nfc_kit.inra.rest.request.CardDataRequest;
+import im.nfc.flutter_nfc_kit.inra.rest.request.CardLoadCommandRequest;
 import im.nfc.flutter_nfc_kit.inra.rest.request.CardReadCommandRequest;
 import im.nfc.flutter_nfc_kit.inra.rest.response.CardCommandResponse;
 import im.nfc.flutter_nfc_kit.inra.rest.response.CardDataResponse;
+import im.nfc.flutter_nfc_kit.inra.rest.response.CardLoadCommandResponse;
 import im.nfc.flutter_nfc_kit.inra.rest.response.CardReadCommandResponse;
 
 import im.nfc.flutter_nfc_kit.inra.utils.Hex;
@@ -31,6 +33,11 @@ public class RestMetroClientHelper {
 
     public interface GetDataCompletionListener {
         void onGetCardResponse(CardDataResponse response);
+        void onReadingError(RequestErrorMsg response);
+    }
+
+    public interface LoadCompletionListener {
+        void onLoadResponse(CardLoadCommandResponse wsResponse);
         void onReadingError(RequestErrorMsg response);
     }
 
@@ -83,6 +90,38 @@ public class RestMetroClientHelper {
                 listener.onReadingError(new RequestErrorMsg(response));
             }
         });
+    }
+
+    public void getLoadCommands(byte[] card_id, DeviceData device_data, LoadCompletionListener listener,
+                                String transactionId, List<CardCommandResponse> results) {
+        Log.d("FlutterNfcKitPlugin", "getLoadCommands");
+        String card = null;
+        if (card_id != null)
+            card = Hex.encodeHex(card_id);
+        RestRequest request = createLoadCommandsRequest(transactionId, card, transactionId, results, device_data);
+        postRequest(request, (task_id, response) -> {
+            if (response != null && response.getCode() == HttpURLConnection.HTTP_OK) {
+                CardLoadCommandResponse ws_response = GsonHelper.customGson.fromJson(response.getData(), CardLoadCommandResponse.class);
+                listener.onLoadResponse(ws_response);
+            } else {
+                listener.onReadingError(new RequestErrorMsg(response));
+            }
+        });
+    }
+
+    private RestRequest createLoadCommandsRequest(String request_id, String card_id, String transactionId, List<CardCommandResponse> results, DeviceData device_data) {
+        CardLoadCommandRequest request = new CardLoadCommandRequest();
+        request.setCardUID(card_id);
+        request.setLanguage(language);
+        request.setTransactionId(transactionId);
+        request.setDeviceData(device_data);
+        request.setOperationList(results);
+        String json = GsonHelper.customGson.toJson(request);
+
+        RestRequest restRequest = new RestRequest(request_id, getURLFormated(SERVER_URL.GET_LOAD_COMMANDS));
+        restRequest.setContentType(RestRequest.CONTENT_TYPE.JSON);
+        restRequest.setParams(json);
+        return restRequest;
     }
 
     private RestRequest createGetDataRequest(String request_id, String card_id, DeviceData device_data) {

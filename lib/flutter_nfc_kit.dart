@@ -327,6 +327,47 @@ class FlutterNfcKit {
     }
   }
 
+  static Future<ActivationData> activate({
+    Duration? timeout,
+    required String type,
+    required String model,
+    required String osVersion,
+    required String nfcDevice,
+    required String deviceId,
+    required String appVersion,
+  }) async {
+    int technologies = 0x0;
+    technologies |= 0x1;
+
+    try {
+      final String data = await _channel.invokeMethod('activate', {
+        'timeout': timeout?.inMilliseconds ?? POLL_TIMEOUT,
+        'technologies': technologies,
+        'data': {
+          'type': type,
+          'model': model,
+          'osVersion': osVersion,
+          'nfcDevice': nfcDevice,
+          'deviceId': deviceId,
+          'appVersion': appVersion,
+        },
+      });
+      await finish();
+      return ActivationData.fromJson(jsonDecode(data));
+    } on PlatformException catch (e) {
+      if (e.code == "3") { // Unknown metro api response code
+        throw UnknownMetroApiException();
+      } else if (e.code == "1") { // Unable to perform network request
+        throw NoNetworkException();
+      } else if (e.code == "2") { // Invalid metro api response
+        throw InvalidMetroApiException();
+      } else if (e.code == "4") { // Invalid metro api response
+        throw NoActivationNeededException();
+      }
+      rethrow;
+    }
+  }
+
   /// Try to poll a NFC tag from reader.
   ///
   /// If tag is successfully polled, a session is started.

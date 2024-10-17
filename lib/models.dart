@@ -10,6 +10,32 @@ class InvalidMetroApiException implements Exception { }
 
 class NoNetworkException implements Exception { }
 
+class NoActivationNeededException implements Exception { }
+
+@JsonSerializable()
+class ActivationData {
+  final int wallet;
+  final String cardId;
+  final List<Product> products;
+
+  ActivationData(this.wallet, this.cardId, this.products);
+
+  factory ActivationData.fromJson(Map<String, dynamic> json) => _$ActivationDataFromJson(json);
+  Map<String, dynamic> toJson() => _$ActivationDataToJson(this);
+}
+
+@JsonSerializable()
+class Product {
+  final int balance;
+  final String? description;
+
+  Product(this.balance, this.description);
+
+  factory Product.fromJson(Map<String, dynamic> json) => _$ProductFromJson(json);
+  Map<String, dynamic> toJson() => _$ProductToJson(this);
+
+}
+
 @JsonSerializable()
 class CardData {
   final int serialNumber;

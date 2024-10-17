@@ -6,6 +6,32 @@ part of 'models.dart';
 // JsonSerializableGenerator
 // **************************************************************************
 
+ActivationData _$ActivationDataFromJson(Map<String, dynamic> json) =>
+    ActivationData(
+      (json['wallet'] as num).toInt(),
+      json['cardId'] as String,
+      (json['products'] as List<dynamic>)
+          .map((e) => Product.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+
+Map<String, dynamic> _$ActivationDataToJson(ActivationData instance) =>
+    <String, dynamic>{
+      'wallet': instance.wallet,
+      'cardId': instance.cardId,
+      'products': instance.products,
+    };
+
+Product _$ProductFromJson(Map<String, dynamic> json) => Product(
+      (json['balance'] as num).toInt(),
+      json['description'] as String?,
+    );
+
+Map<String, dynamic> _$ProductToJson(Product instance) => <String, dynamic>{
+      'balance': instance.balance,
+      'description': instance.description,
+    };
+
 CardData _$CardDataFromJson(Map<String, dynamic> json) => CardData(
       (json['serialNumber'] as num).toInt(),
       (json['balance'] as num).toInt(),

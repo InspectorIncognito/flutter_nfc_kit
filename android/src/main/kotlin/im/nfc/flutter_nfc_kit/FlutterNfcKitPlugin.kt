@@ -11,6 +11,8 @@ import android.nfc.tech.*
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import im.nfc.flutter_nfc_kit.ByteUtils.canonicalizeData
 import im.nfc.flutter_nfc_kit.ByteUtils.hexToBytes
 import im.nfc.flutter_nfc_kit.ByteUtils.toHexString
@@ -23,12 +25,15 @@ import im.nfc.flutter_nfc_kit.inra.card.CardCommandExecutioner
 import im.nfc.flutter_nfc_kit.inra.rest.RequestErrorMsg
 import im.nfc.flutter_nfc_kit.inra.rest.ResponseCodeCatalogue
 import im.nfc.flutter_nfc_kit.inra.rest.response.CardDataResponse
+import im.nfc.flutter_nfc_kit.inra.rest.response.CardLoadCommandResponse
 import im.nfc.flutter_nfc_kit.inra.rest.response.CardReadCommandResponse
-import im.nfc.flutter_nfc_kit.inra.utils.JsonConverter
+import im.nfc.flutter_nfc_kit.inra.utils.ActivationDataJsonConverter
+import im.nfc.flutter_nfc_kit.inra.utils.CardDataJsonConverter
 import io.flutter.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -40,12 +45,7 @@ import java.io.IOException
 import java.lang.ref.WeakReference
 import java.lang.reflect.InvocationTargetException
 import java.util.*
-import kotlin.collections.HashMap
 import kotlin.concurrent.schedule
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import io.flutter.embedding.engine.plugins.lifecycle.FlutterLifecycleAdapter
-import io.flutter.embedding.engine.plugins.lifecycle.HiddenLifecycleReference
 
 
 class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
@@ -128,7 +128,7 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun handleMethodCall(call: MethodCall, result: Result) {
-
+        Log.w(TAG, "handleMethodCall ${call.method}")
         if (activity.get() == null) {
             result.error("500", "Cannot call method when not attached to activity", null)
             return
@@ -201,6 +201,25 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val technologies = call.argument<Int>("technologies")!!
                 runOnNfcThread(result, "Read") {
                     read(nfcAdapter, result, timeout, technologies, deviceData)
+                }
+            }
+
+            "activate" -> {
+                val timeout = call.argument<Int>("timeout")!!
+                val rawDeviceData = call.argument<HashMap<String, String>>("data")!!
+                //val rawDeviceData = JSONObject(jsonString)
+                val deviceData = DeviceData(
+                        rawDeviceData.get("type")!!,
+                        rawDeviceData.get("osVersion")!!,
+                        rawDeviceData.get("model")!!,
+                        rawDeviceData.get("nfcDevice")!!,
+                        rawDeviceData.get("deviceId")!!,
+                        rawDeviceData.get("appVersion")!!,
+                )
+
+                val technologies = call.argument<Int>("technologies")!!
+                runOnNfcThread(result, "Activate") {
+                    activate(nfcAdapter, result, timeout, technologies, deviceData)
                 }
             }
 
@@ -630,16 +649,24 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     private fun read(nfcAdapter: NfcAdapter, result: Result, timeout: Int, technologies: Int, deviceData: DeviceData) {
         Log.d(TAG, "read")
-        pollingTimeoutTask = Timer().schedule(timeout.toLong()) {
+        var stopped = false
+        val stopRunnable = Runnable {
+            stopped = true
             try {
                 if (activity.get() != null) {
-
                     nfcAdapter.disableReaderMode(activity.get())
                 }
             } catch (ex: Exception) {
                 Log.w(TAG, "Cannot disable reader mode", ex)
             }
-            result.error("408", "Polling tag timeout", null)
+        }
+        pollingTimeoutTask?.cancel()
+        pollingTimeoutTask = Timer().schedule(timeout.toLong()) {
+            if (!stopped) {
+                stopRunnable.run()
+                Log.w(TAG, "408")
+                result.error("408", "Polling tag timeout", null)
+            }
         }
 
         val readHandler = ReaderCallback { tag ->
@@ -653,12 +680,16 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val getCardListener = object : RestMetroClientHelper.GetDataCompletionListener {
                     override fun onGetCardResponse(response: CardDataResponse?) {
                         Log.d(TAG, "onGetCardResponse")
-                        val data = JsonConverter().toJson(response!!.cardData)
+                        val data = CardDataJsonConverter().toJson(response!!.cardData)
                         Log.d(TAG, data.toString())
+                        stopRunnable.run()
+                        pollingTimeoutTask?.cancel()
                         result.success(data.toString())
                     }
 
                     override fun onReadingError(response: RequestErrorMsg?) {
+                        stopRunnable.run()
+                        pollingTimeoutTask?.cancel()
                         result.error("4", "onReadingResponse", null)
                     }
                 }
@@ -678,21 +709,105 @@ class FlutterNfcKitPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                                 RestMetroClientHelper.getInstance().getCardData(mifareClassic.tag.id, deviceData, getCardListener)
                             } else {
                                 Log.d(TAG, "UNKNOWN CODE: $resultCode")
+                                stopRunnable.run()
+                                pollingTimeoutTask?.cancel()
                                 result.error("3", "onReadingResponse", null)
                             }
                         } else {
                             Log.d(TAG, "NULL Response")
-                            result.error("2", response.toString(), null)
+                            stopRunnable.run()
+                            pollingTimeoutTask?.cancel()
+                            result.error("2", null, null)
                         }
                     }
 
                     override fun onReadingError(response: RequestErrorMsg?) {
                         Log.d(TAG, "onReadingError")
+                        stopRunnable.run()
                         result.error("1", response.toString(), null)
                     }
                 }
 
                 RestMetroClientHelper.getInstance().getReadingCommands(mifareClassic.tag.id, deviceData, readingListener, "", null)
+            }
+        }
+
+        nfcAdapter.enableReaderMode(activity.get(), readHandler, technologies, null)
+    }
+
+    private fun activate(nfcAdapter: NfcAdapter, result: Result, timeout: Int, technologies: Int, deviceData: DeviceData) {
+        Log.d(TAG, "activate")
+        var stopped = false
+        val stopRunnable = Runnable {
+            stopped = true
+            try {
+                if (activity.get() != null) {
+                    nfcAdapter.disableReaderMode(activity.get())
+                }
+            } catch (ex: Exception) {
+                Log.w(TAG, "Cannot disable reader mode", ex)
+            }
+        }
+        pollingTimeoutTask?.cancel()
+        pollingTimeoutTask = Timer().schedule(timeout.toLong()) {
+            if (!stopped) {
+                stopRunnable.run()
+                Log.w(TAG, "408")
+                result.error("408", "Polling tag timeout", null)
+            }
+        }
+
+        val readHandler = ReaderCallback { tag ->
+            val mifareClassic = MifareClassic.get(tag)
+            Log.d(TAG, "got card")
+            if (mifareClassic != null) {
+                activity.get()?.runOnUiThread {
+                    eventSink?.success(1)
+                }
+                Log.d(TAG, "card is mifare")
+
+                val loadListener = object : RestMetroClientHelper.LoadCompletionListener {
+                    override fun onLoadResponse(response: CardLoadCommandResponse?) {
+                        Log.d(TAG, "onLoadResponse")
+                        if (response != null) {
+                            if (response.code != null && response.code == ResponseCodeCatalogue.CARD_PENDING_OPERATION.value) {
+                                val responses = CardCommandExecutioner().executeCardCommandsAndroidV2(mifareClassic, response.commands)
+                                Log.d(TAG, responses.toString())
+                                RestMetroClientHelper.getInstance().getLoadCommands(mifareClassic.tag.id, deviceData, this, response.transactionId, responses)
+                            } else if (response.code != null && response.code >= ResponseCodeCatalogue.OPERATION_OK.value) {
+                                val data = ActivationDataJsonConverter().toJson(response)
+                                Log.d(TAG, data.toString())
+                                stopRunnable.run()
+                                pollingTimeoutTask?.cancel()
+                                result.success(data.toString())
+                            } else if (response.description != null && response.description.contains("No hay recargas")) {
+                                Log.d(TAG, "NO ACTIVATION: $response")
+                                stopRunnable.run()
+                                pollingTimeoutTask?.cancel()
+                                result.error("4", response.toString(), null)
+                            } else {
+                                Log.d(TAG, "UNKNOWN: $response")
+                                stopRunnable.run()
+                                pollingTimeoutTask?.cancel()
+                                result.error("3", response.toString(), null)
+                            }
+                        } else {
+                            Log.d(TAG, "NULL Response")
+                            stopRunnable.run()
+                            pollingTimeoutTask?.cancel()
+                            result.error("2", null, null)
+                        }
+                    }
+
+                    override fun onReadingError(response: RequestErrorMsg?) {
+                        Log.d(TAG, "onReadingError")
+                        stopRunnable.run()
+                        pollingTimeoutTask?.cancel()
+                        result.error("1", response.toString(), null)
+                    }
+                }
+
+                RestMetroClientHelper.getInstance().getLoadCommands(mifareClassic.tag.id, deviceData, loadListener, "", null)
             }
         }
 

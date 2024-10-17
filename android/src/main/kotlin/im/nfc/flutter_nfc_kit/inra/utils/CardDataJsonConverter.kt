@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 
-class JsonConverter {
+class CardDataJsonConverter {
 
     fun toJson(data: CardDataFormated): JSONObject {
         return JSONObject(mapOf(
